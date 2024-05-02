@@ -1,0 +1,287 @@
+[Kafka Theory - START 18-04-2024]
+- Kafka is used only as a transportation mechanism!!!
+
+Topics -> a particular stream of data:
+- it's like a table in a database (without all the constraints)
+- you can have as many as you want and you identify them by NAME
+- any kind of message format
+- the sequence of messages is called a data stream
+- Kafka topics are made from partitions
+- messages are ordered in partitions
+- each message within a partition gets an incremental id, called offset (this is to each message within a partion, exaple 0->1->2...)
+- Kafka topics are immutable, once data is written to a partition, it cannot be changed
+
+Producers -> sends data to a Topic partitions:
+- they know in advance to which partiotions they write to (and which kafka broker has it)
+- producer can send a key (of any data type) with the message
+-> if the key=null then the data is sent round robin (partition 0, partition 1,...)
+-> if the key!=null the all mesages for that key will always go to the same partition (hashing)
+-> a key is tipically sent if you need message ordering for a specific field
+
+Kafka Message Serialazer -> transform objects/data into bytes:
+- serialization is used on the value and the key
+
+Consumers -> read data from a topic (Identified by name):
+- pull model -> consumer request data from Kafka brokers (servers)
+- they automatically know which broker to read from
+- they also automatically recover if it failes for any reason
+- it reads from particion in order off the offsets
+
+Consumer Deserialazer -> transform bytes into objects/data:
+- deserialization is used on the value and the key
+- don't change data type within topic, instead a new topic should be created!!
+
+Consumer Groups:
+- all the consumers in an applicaton read data as a consumer group
+- each consumer within a group reads from exclusive partitions (1 consumer predefined for a specific partition/s)
+- in case there are more consumers then partionions the rest consumers reamin inactive
+- you can have multiple consumer groups on one Topic (important: multiple consumer can read from a same partiion)
+- they are distinquised by group.id
+- whenever a consumer will be shutdown within a group 
+  it's partitions will be rebalanced between the rest of the consumers within the group
+-> this also happens if the administrator also ads a new partition into a topic
+- type of rebalances are
+-> Eager rebalance
+-> Cooperative Rebalance (Incremental Rebalance)
+
+Cooperative Rebalance -> here are the exicting strategies for assignment:
+- RangeAssignor
+- RoundRobin
+- StickyAssignor
+- CooperativeStickyAssignor
+- the default since kafka 3.x.x is [RangeAssignor, CooperativeStickyAssignor]
+-> it means RangeAssignor is used by default but allows upgrading to CooperativeStickyAssignor with just
+   a single rolling bounce that removes the RangeAssignor from the list
+
+Static Group Membership for consumers:
+- it allows to specify a group.instance.id for a consumers
+- if the consumer with static membership will leave the group, then the particion won't be reassigned
+-> this is true only till the session.timout.ms
+-> if it won't join back by the session.timeout.ms, then the rebalance will happen and the partiion
+   will be reassigned to other consumer
+
+Consumer Offsets -> Kafka stores the offsets at which a consumer group has been reading:
+- the offsets commited are in Kafka topic named "__consumer_offsets"
+- every consumer in a group should periodically commiting the offsets (the Kafka broker writes to __consumer_offsets, not the group itself)
+-> the reason for saving the offests, is because if a consumer dies it will be able to read back where it left it of
+- there are different delivery semantics for consumers (the way how often the offset is commited)
+-> at least once
+-> at most once
+-> exactly once
+-> java has a default "at least once" approach
+-> based on used semantic make sure the process is idempotent (duplicate process of the message won't impact the system)
+
+Kafka Consumer - Aut Offset Commit Behavior:
+- auto.commit.interval.ms = 5000 and enable.auto.commit = true
+-> then the offset will be adjusted and commited to the server based on the last .poll()
+- there is a possiblity to disable autocommit and create a separate thread that autocommits customly
+-> meaning you will call .commitSync() or .commitAsync(), but this is advanced not shown in the course
+
+Kafka Brokers (Servers) -> a Kafka cluster is composed of multiple Kafka brokers (servers):
+- each broker is identified with its ID (integer)
+- each broker contains certain topic partitions
+
+Kafka Broker Discovery:
+- every Kafka broker is also called a "bootstrap server"
+- Kafka client need to connect to only one broker (bootstrap server) and it give you the list of all brokers
+- each broker knows about all the other brokers and it's topics and partitions (which means it has the metadata about it)
+
+Topic Replication Factor:
+- Topics should have a replication factor > 1 (usually it's 2 or 3 but it can be more)
+- this way if broker is down, another can serve the data
+
+Concept of Leader for a Partition:
+- at any time only one broker can be a leader for a given partition
+- producer can only send data to the broker that is a leader of a partition
+- each partition has one leader and multiple ISR (in-sync replica)
+- since Kafka 2.4, it is possible to configure consumers to read from the closest replica
+-> due to help of improving latency and also decrease network costs if using the cloud (in case the leader is in other datacenter)
+
+Producer Acknowledgments (acks):
+- Producers can choose to receive acknowlegments of data writes
+-> acks=0, Producer won't wait for acks (possible data loss)
+-> acks=1, Producer will wait for leader acks (limited data loss)
+-> acks=all, Leader + repicas acks (no data loss)
+
+Kafka Topic Durability:
+- as a rule, for a replication factor of N, you can permanently lose up to N-1 brokers and still recover your data
+
+Zookeper -> is a software:
+- manages brokers (keeps a list of them)
+- helps in performing leader election for partitions
+- sends notifications to Kafka in case of changes (new topic, broker dies, broker comes up, delete topics, etc...)
+- Kafka since 2.x can't work without Zookeper
+- since 3.x you can have kafka without Zookeper
+-> using Kafka Raft instead (KIP-500)
+- Kafka 4.x will not have Zookeper
+- dy design zookeper operates with an odd number of servers (1,3,5,7)
+- Zookeper has a leader (writes) the rest of the servers are followers (reads)
+- Zookeper does NOT store consumer offsets with Kafka > v0.10
+
+
+[Producer Settings]:
+
+Producer Acknowledgments (Acks) -> theory see above (acks=0,1 or all):
+- acks=1 was default by Kafka in v1.0 to v2.8
+- acks=all or acks=-1 is a default value for Kafka 3.0+
+- for acks=all the leader of replica for a particion checks to see if there are enough in-sync replicas
+   for safely writing the message (controlled by the broker setting min.insync.replicas)
+-> example min.insync.replicas = 1 where only the broker leader needs to be successfully ack
+-> if the min.insync.replicas is higher then available replicas it responds to producer with
+   NOT_ENOUGH_REPLICAS
+   
+Producer Retries:
+- in transient failures developers are expected to handle exceptions
+-> example of transient failure "NOT_ENOUGH_REPLICAS"
+- retries setting is by defualt 0 for Kafka <= v2.0 and 2147483647 (Int32) for Kafka >= v2.1
+- the retry.backoff.ms setting is by default 100ms
+-> how much time to wait until next retry
+- retries are bounded by timeout if retries > 0
+-> Since kafka 2.1, you can set: delivery.timetout.ms=120000 (==2min)
+-> the timeout is counted form where it sent till it reaches Kafka and it acks it
+-> if the producer won't receive an ack within the timeout the message will fail
+- max.in.flight.requests.per.connection -> how many produce requests can be done in parallel
+-> in older version Kafka this could lead to out of order messages even with the key value, if a batch failed	
+
+Idempotent Producer:
+- def Idempotent -> s the property of certain operations in mathematics and computer science whereby they can be applied multiple times without changing the result beyond the initial application.
+- in case of a duplicate request, the Kafka server detects it and send the ack anyway to Porducer, but it won't process it again
+-> this is by assumption that the Producer didn't get the ack even if the Kafka processed the message successfully
+- Important they are default only since Kafka >= v3.0
+-> the idempotent producer exists since Kafka v0.11
+-> you can set it like "producerProps.put("enable.idempotent", true);
+
+Message Compression:
+- by default it's none
+- it can be set up at Producer level or Broker
+- it is defined in compression.type
+-> examples gzip, lz4, snappy, zstd (Kafka v2.1)
+-> you can set it up also as producer or broker
+- more info if interested -> https://blog.cloudflare.com/squeezing-the-firehose
+
+linger.ms and batch.size:
+- linger.ms how long to wait until we send a batch. add in a small number add more messages in the batch the expence of latency
+- batch size how big of the batch should be
+-> if the batch size is filled before linger.ms, then send the batch
+-> by default it's 16KB
+-> a batch is allocated per particion
+-> you can monitor the average batch size metric using Kafka Producer Metric
+
+Default partitioner when key != null:
+- Key Hashing is the process of determining the mapping of a key to a partition
+- in the default particioner, the keys are hashed using the murmur2 algorithm
+- targetPartition = Math.abs(Utils.murmur2(keyBytes)) % (numPartitions - 1)
+- if you add a new partition to a topic it will completely alter the formula
+- if neccessary you can override the behavior of the partitioner by using particioner.class
+-> this is highly NOT recommended
+
+When key=null:
+- the producer has a default particioner that varies
+-> Round Robin for Kafka <= v2.3
+-> Sticky Partitioner for Kafka >= v2.4
+
+max.block.ms and buffer.memory:
+- if the producer produces faster than the broker can take, the records will be buffered in memory
+- buffer.memory=33554432(32MB) the size of the send buffer
+- if the buffer will fill up then the .send() method will start to block (won't return right away)
+- max.block.ms=60000 the time the .send() will block until throwing  an exception.
+- excpetion are thrown when
+-> the producer has filled up it's buffer
+-> the broker is not accepting any new data
+-> 60000ms has elapsed
+
+[Consumer Settings]
+
+Deliivery semantics:
+- At most once -> the offset is commited as soon as the message is received, if the processing goes wrong
+                 the message will be lost (it won't be read again)
+- At least once (preffered) -> offset is commited after the message is processed, if the processing goes wrong
+                               the message will be read again. Here is crucial to set up the processing as Idempotent (Idempotent Consumer)
+- Exactly once (dream goal) -> Can be acheived for Kafka , Kafka workflows using the Transactional API (easy with Kafka Streams API).
+                               For Kafka Sink workflows, use an idempotent consumer.
+							  
+Consumer Offset Commit Strategies:
+- 2 strategies
+-> (easy) enable.auto.commit=true & synchronous processing of batches
+-> (medium) enable.auto.commit = false & manual commit of offsets
+
+Auto Offset Commit assynchronously:
+- if auto.commit=true
+- it will commit the offset when you call .poll() and auto.commit.interval.ms has elapsed
+- make sure that the messages are all successfully processed before you call poll again
+-> if you won't do it, you won't be at least nce scenario
+
+Auto Offset Commit Disabled:
+- synchronous process of batches
+- storing offsets internally (very advanced)
+
+Consuer Offset Reset Behavior:
+- by default Kafka has a data retention 7 days for Kafka >= v2.0
+- it is 1 day for Kafka < v2.0
+-> this can be contorlled by broker setting offset.retention.minutes
+- auto.offset.reset=latest/earliest/none
+-> latest will read from the end of the log
+-> earliest will read from the start of the log
+-> none will throw and exception if no offset is found
+
+Consumer Internal Threads:
+- Consumer Coorinator (acting broker) a.k.a Heartbeat Threads
+-> - it can be defined in heartbeat.interval.ms (default 3 seconds)
+-> usually it's 1/3rd of session.timeout.ms
+- Consumer poll thread -> max.poll.interval.ms (default 5 minutes)
+-> max amount of time between 2 .poll() calls before the consumer is declared dead
+-> this is relevant mainly for Big Data framworks like Spark in case the processing takes time
+-> max.poll.records (Default 500) for a batch
+- Consumer Poll Behavior -> fetch.min.bytes (default 1)
+-> controls how much data you want to pull at least on each request
+-> fetch.max.wait.ms (default 500) is the max amount of time the Kafka broker will block before
+   answering the fetch request if there isn't sufficient data to immediately satisfy the requirment
+   gyve by fetch.min.bytes
+-> max.particion.fetch.bytes (default 1MB) max amount of data per partition the server will return
+-> fetch.max.bytes (default 55MB) max data returned for each fetch request
+- to avoid issues consumers are encouraged to process data fast and poll often 
+see Course 86
+
+Consumer Replica Fetching:
+- if you have more data center and you don't want to read from the leader partition if it is in different data center
+- it can be set up in Broker setting by rack.id by Kafka >= v2.4
+-> config must be set tot the data centre ID
+-> replica.selector.class must be set to org.apache.kafka.replica.RackAwareReplicaSelector
+- then the consumer have have set the client.rack to the data centre ID the consumer is launched on
+
+[Kafka Extended APIs]
+- Kafka Connect -> solves External Source => Kafka and Kafka => External Sink (targets)
+- Kafka Streams -> solves transformations Kafka => Kafka (example topic to topic)
+- Schema Registry helps using Schema in Kafka
+
+Kafka Connect:
+- main ides is to reuse existing code
+- part of your ETL pipeline
+
+Kafka Streams:
+- is a easy data processing and transformation library within Kafka
+-> you can do Data Transformation, Data Enrichment, Fraud Detection, Monitoring and Alerting
+- one record at a time processsing, no batching
+- definition from internet
+-> is a powerful library for building stream-processing applications
+  using Apache Kafka. It provides a high-level DSL (Domain-Specific Language) and APIs for processing, 
+  transforming, and analyzing continuous streams of records
+-> client library providing organizations with a particularly efficient framework for processing 
+  streaming data. It offers a streamlined method for creating 
+  applications and microservices that must process data in real-time to be effective
+-> The computational logic of a Kafka Streams application is defined as a processor topology, 
+  which is a graph of stream processors (nodes) and streams (edges)
+  You can define the processor topology with the Kafka Streams APIs: Kafka Streams DSL
+  
+Schema Registry:
+- Schema describes how the data looks like
+- Schema registry is where you store them
+- it is a separate component!!!
+- producers and consumers are talking to this schema registry
+- it is able to reject bad data
+- the commond data format must be agreed upon by the Schema Registry
+- purpose
+-> store and retrieve schemas for producers/consumers
+-> enforce backward/forward/full compatibility on topics
+-> decrease the size of the payload of data sent to Kafka
+- it is a Apache Avro as a data format (Protobuf, JSON Schema also supported)

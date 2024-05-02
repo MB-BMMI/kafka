@@ -1,0 +1,5 @@
+Zookeper start:
+-zookeeper-server-start.sh ~/udemy/kafka/kafka_2.13-3.7.0/config/zookeeper.properties
+
+Kafka Start:
+-kafka-server-start.sh ~/udemy/kafka/kafka_2.13-3.7.0/config/server.properties 
